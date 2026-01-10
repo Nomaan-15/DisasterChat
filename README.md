@@ -1,4 +1,4 @@
-# 🚨 DisasterNet - Offline Emergency Chat System
+# 🚨 DisasterChat - Offline Emergency Chat System
 
 A modern, offline-first peer-to-peer emergency communication system built for disaster scenarios where internet connectivity is unavailable.
 
