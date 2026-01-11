@@ -4,7 +4,6 @@ import { Send, Users, Menu, Radio, Wifi } from 'lucide-react';
 
 function App() {
   // State management
-  const [socket, setSocket] = useState(null);
   const [isConnected, setIsConnected] = useState(false);
   const [hasJoined, setHasJoined] = useState(false);
   
@@ -20,7 +19,6 @@ function App() {
   
   // UI state
   const [sidebarOpen, setSidebarOpen] = useState(true);
-  // ✅ UPDATED: Use environment variable with fallback to localhost
   const [serverUrl, setServerUrl] = useState(
     import.meta.env.VITE_API_URL || 'http://localhost:3001'
   );
@@ -29,7 +27,8 @@ function App() {
   const messagesEndRef = useRef(null);
   const typingTimeoutRef = useRef(null);
   const messageInputRef = useRef(null);
-  const socketRef = useRef(null);  // Keep a ref to the socket
+  const socketRef = useRef(null);
+  const isConnectingRef = useRef(false); // ✅ NEW: Prevent multiple connections
 
   // Auto-scroll to bottom
   const scrollToBottom = () => {
@@ -40,33 +39,44 @@ function App() {
     scrollToBottom();
   }, [messages]);
 
-  // Connect to server
+  // ✅ FIXED: Connect to server only once
   const connectToServer = () => {
+    // Prevent multiple simultaneous connections
+    if (isConnectingRef.current || (socketRef.current && socketRef.current.connected)) {
+      console.log('⚠️ Already connecting or connected, skipping...');
+      return socketRef.current;
+    }
+
+    isConnectingRef.current = true;
     console.log('🔌 Connecting to server:', serverUrl);
     
     const newSocket = io(serverUrl, {
       transports: ['websocket', 'polling'],
-      reconnectionAttempts: 5,
-      reconnectionDelay: 1000,
+      reconnectionAttempts: 10,
+      reconnectionDelay: 2000,
+      timeout: 60000,
+      autoConnect: true,
     });
 
-    // Store in ref immediately
     socketRef.current = newSocket;
 
     newSocket.on('connect', () => {
       console.log('✅ Connected to server! Socket ID:', newSocket.id);
       setIsConnected(true);
+      isConnectingRef.current = false;
     });
 
     newSocket.on('disconnect', () => {
       console.log('❌ Disconnected from server');
       setIsConnected(false);
       setHasJoined(false);
+      isConnectingRef.current = false;
     });
 
     newSocket.on('connect_error', (error) => {
       console.error('❌ Connection error:', error);
       setIsConnected(false);
+      isConnectingRef.current = false;
     });
 
     // Receive message history
@@ -78,14 +88,19 @@ function App() {
     // Receive new messages
     newSocket.on('receive-message', (data) => {
       console.log('💬 New message:', data);
-      setMessages(prev => [...prev, data]);
+      setMessages(prev => {
+        // ✅ Prevent duplicate messages by checking if message already exists
+        const exists = prev.some(msg => msg.id === data.id);
+        if (exists) return prev;
+        return [...prev, data];
+      });
     });
 
     // User joined
     newSocket.on('user-joined', (data) => {
       console.log('✅ User joined:', data.username);
       setMessages(prev => [...prev, {
-        id: Date.now().toString(),
+        id: `system-${Date.now()}-${Math.random()}`, // ✅ Unique ID
         type: 'system',
         message: `${data.username} joined the chat`,
         timestamp: data.timestamp
@@ -96,7 +111,7 @@ function App() {
     newSocket.on('user-left', (data) => {
       console.log('❌ User left:', data.username);
       setMessages(prev => [...prev, {
-        id: Date.now().toString(),
+        id: `system-${Date.now()}-${Math.random()}`, // ✅ Unique ID
         type: 'system',
         message: `${data.username} left the chat`,
         timestamp: data.timestamp
@@ -106,7 +121,11 @@ function App() {
     // User list update
     newSocket.on('user-list', (userList) => {
       console.log('👥 Updated user list:', userList.length, 'users');
-      setUsers(userList);
+      // ✅ Remove duplicates based on socket id
+      const uniqueUsers = Array.from(
+        new Map(userList.map(user => [user.id, user])).values()
+      );
+      setUsers(uniqueUsers);
     });
 
     // Typing indicator
@@ -122,11 +141,10 @@ function App() {
       }
     });
 
-    setSocket(newSocket);
     return newSocket;
   };
 
-  // Join chat room - FIXED VERSION
+  // ✅ FIXED: Join chat room
   const handleJoin = (e) => {
     e.preventDefault();
     
@@ -137,12 +155,12 @@ function App() {
 
     console.log('🚀 Joining room:', { username, room });
 
-    // If socket doesn't exist, create it
+    // If socket doesn't exist or isn't connected, create it
     if (!socketRef.current || !socketRef.current.connected) {
       const newSocket = connectToServer();
       
       // Wait for connection, then join
-      newSocket.on('connect', () => {
+      newSocket.once('connect', () => {
         console.log('✅ Connected! Now joining room...');
         newSocket.emit('join', { username: username.trim(), room: room.trim() });
         setHasJoined(true);
@@ -158,7 +176,7 @@ function App() {
   // Send message
   const handleSendMessage = (e) => {
     e.preventDefault();
-    if (newMessage.trim() && socketRef.current) {
+    if (newMessage.trim() && socketRef.current && socketRef.current.connected) {
       console.log('📤 Sending message:', newMessage);
       socketRef.current.emit('send-message', { message: newMessage });
       setNewMessage('');
@@ -173,7 +191,7 @@ function App() {
   const handleTyping = (e) => {
     setNewMessage(e.target.value);
     
-    if (socketRef.current) {
+    if (socketRef.current && socketRef.current.connected) {
       socketRef.current.emit('typing', { isTyping: true });
       
       // Clear existing timeout
@@ -183,7 +201,9 @@ function App() {
       
       // Set new timeout to stop typing indicator
       typingTimeoutRef.current = setTimeout(() => {
-        socketRef.current.emit('typing', { isTyping: false });
+        if (socketRef.current && socketRef.current.connected) {
+          socketRef.current.emit('typing', { isTyping: false });
+        }
       }, 1000);
     }
   };
@@ -215,12 +235,16 @@ function App() {
       .slice(0, 2);
   };
 
-  // Cleanup on unmount
+  // ✅ FIXED: Cleanup on unmount
   useEffect(() => {
     return () => {
+      console.log('🧹 Cleaning up socket connection...');
       if (socketRef.current) {
+        socketRef.current.removeAllListeners(); // Remove all event listeners
         socketRef.current.close();
+        socketRef.current = null;
       }
+      isConnectingRef.current = false;
     };
   }, []);
 
@@ -240,9 +264,9 @@ function App() {
             Connected
           </div>
         ) : (
-          <div className="status-badge" style={{ background: '#ef4444' }}>
+          <div className="status-badge" style={{ background: '#f59e0b' }}>
             <Wifi size={12} />
-            Connecting...
+            Connecting... (may take 30-50s if backend is sleeping)
           </div>
         )}
 
