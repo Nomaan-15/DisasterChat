@@ -8,15 +8,30 @@ const path = require('path');
 
 const app = express();
 const server = http.createServer(app);
+
+// ✅ UPDATED: Proper CORS configuration for production
+const allowedOrigins = [
+  'http://localhost:5173',           // Local development
+  'http://localhost:3000',           // Alternative local port
+  process.env.FRONTEND_URL,          // Your Netlify URL from environment variable
+];
+
+// Filter out undefined values
+const validOrigins = allowedOrigins.filter(Boolean);
+
 const io = socketIO(server, {
   cors: {
-    origin: "*",
-    methods: ["GET", "POST"]
+    origin: validOrigins.length > 0 ? validOrigins : "*",
+    methods: ["GET", "POST"],
+    credentials: true
   }
 });
 
 // Middleware
-app.use(cors());
+app.use(cors({
+  origin: validOrigins.length > 0 ? validOrigins : "*",
+  credentials: true
+}));
 app.use(express.json());
 
 // Configuration
@@ -173,6 +188,8 @@ server.listen(PORT, '0.0.0.0', () => {
   console.log(`📡 Server: http://localhost:${PORT}`);
   console.log(`🏠 Room: ${ROOM_NAME}`);
   console.log(`📝 Logs: ${LOG_FILE}`);
+  console.log('================================');
+  console.log(`🌐 Allowed origins: ${validOrigins.join(', ')}`);
   console.log('================================\n');
   console.log('💡 Others can connect using your local IP address');
   console.log('   Find your IP: ipconfig (Windows) or ifconfig (Mac/Linux)\n');
