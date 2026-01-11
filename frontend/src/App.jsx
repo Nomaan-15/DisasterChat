@@ -20,7 +20,10 @@ function App() {
   
   // UI state
   const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [serverUrl, setServerUrl] = useState('http://localhost:3001');
+  // ✅ UPDATED: Use environment variable with fallback to localhost
+  const [serverUrl, setServerUrl] = useState(
+    import.meta.env.VITE_API_URL || 'http://localhost:3001'
+  );
   
   // Refs
   const messagesEndRef = useRef(null);
@@ -250,8 +253,11 @@ function App() {
               type="text"
               value={serverUrl}
               onChange={(e) => setServerUrl(e.target.value)}
-              placeholder="http://localhost:3001"
+              placeholder="https://your-backend.onrender.com"
             />
+            <small style={{ color: '#9ca3af', fontSize: '12px', marginTop: '4px', display: 'block' }}>
+              Default: {import.meta.env.VITE_API_URL || 'http://localhost:3001'}
+            </small>
           </div>
 
           <div className="input-group">
@@ -282,7 +288,7 @@ function App() {
         </form>
 
         <p style={{ marginTop: '20px', fontSize: '12px', color: '#9ca3af' }}>
-          💡 Make sure you're connected to the same WiFi network
+          💡 Connected to: {serverUrl}
         </p>
       </div>
     );
